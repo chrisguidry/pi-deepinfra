@@ -59,6 +59,15 @@ function perMillionCached(
 
 // The catalog reports max_tokens per model; DeepInfra sets it to the model's
 // context length, which is the only size signal the endpoint exposes.
+// DeepInfra accepts reasoning_effort "none" and it disables reasoning, but
+// only models tagged can-disable-reasoning honor it. On other reasoning
+// models the "off" level would be a lie, so the map removes it from pi's
+// thinking-level picker.
+function thinkingLevelMap(model: DeepInfraModel): ProviderModelConfig["thinkingLevelMap"] {
+  if (!model.tags.includes("reasoning")) return undefined;
+  return model.tags.includes("can-disable-reasoning") ? { off: "none" } : { off: null };
+}
+
 export function toModel(model: DeepInfraModel): ProviderModelConfig {
   const contextWindow =
     model.max_tokens && model.max_tokens > 0 ? model.max_tokens : DEFAULT_CONTEXT_WINDOW;
@@ -67,6 +76,7 @@ export function toModel(model: DeepInfraModel): ProviderModelConfig {
     id: model.model_name,
     name: model.model_name,
     reasoning: model.tags.includes("reasoning"),
+    thinkingLevelMap: thinkingLevelMap(model),
     input: model.tags.includes("multimodal") ? ["text", "image"] : ["text"],
     cost: {
       input: inputPerMillion,
@@ -117,14 +127,19 @@ export async function refreshModels(context: RefreshModelsContext): Promise<Prov
 }
 
 export default function (pi: ExtensionAPI) {
-  // Credentials come from config, not here: pi resolves apiKey from
-  // $ENV_VAR, ${ENV_VAR}, a literal, or a leading !command (for example
-  // "!op read 'op://Vault/Item/credential'"). Registering an apiKey here
-  // would override a models.json entry, because the extension wins.
+  // pi resolves apiKey references from config: $ENV_VAR, ${ENV_VAR}, a
+  // literal, or a leading !command (for example
+  // "!op read 'op://Vault/Item/credential'"). pi only auto-discovers env
+  // keys for its built-in providers, so the extension registers the
+  // DEEPINFRA_API_KEY reference itself when the variable is set. An
+  // extension-registered apiKey overrides a models.json entry, so the
+  // registration is conditional: without the variable, models.json remains
+  // the only source.
   pi.registerProvider(PROVIDER_ID, {
     name: PROVIDER_NAME,
     baseUrl: BASE_URL,
     api: "openai-completions",
+    ...(process.env.DEEPINFRA_API_KEY ? { apiKey: "$DEEPINFRA_API_KEY" } : {}),
     models: [],
     refreshModels,
   });
