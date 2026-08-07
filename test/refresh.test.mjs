@@ -51,6 +51,26 @@ test("fetches the catalog and publishes it for persistence when network is allow
   assert.equal(context.published[0].persist.models.length, 1);
 });
 
+test("persists the thinking level map with a reasoning model", async (t) => {
+  stubFetch(t, async () =>
+    catalogResponse([{ ...SERVING_MODEL, tags: ["openai", "tools", "reasoning", "can-disable-reasoning"] }]),
+  );
+  const context = refreshContext({ allowNetwork: true });
+
+  const models = await refreshModels(context);
+
+  assert.deepEqual(models[0].thinkingLevelMap, {
+    minimal: "minimal",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+    off: "none",
+  });
+  assert.equal(context.published[0].persist.models[0].thinkingLevelMap.max, "max");
+});
+
 test("falls back to the stored catalog when the network fails", async (t) => {
   stubFetch(t, async () => {
     throw new Error("connection refused");

@@ -57,15 +57,27 @@ function perMillionCached(
   return (rate ?? 0) * inputPerMillion;
 }
 
-// The catalog reports max_tokens per model; DeepInfra sets it to the model's
-// context length, which is the only size signal the endpoint exposes.
-// DeepInfra accepts reasoning_effort "none" and it disables reasoning, but
-// only models tagged can-disable-reasoning honor it. On other reasoning
-// models the "off" level would be a lie, so the map removes it from pi's
-// thinking-level picker.
+// DeepInfra's OpenAI-compatible endpoint validates reasoning_effort against
+// the full OpenAI-style scale and rejects anything else with HTTP 422, so
+// every reasoning model can take minimal through max. The catalog's only
+// per-model signal is can-disable-reasoning: on those models reasoning_effort
+// "none" turns reasoning off, so the off level is real; on the others the
+// model reasons no matter what is asked, so off is a lie and is hidden from
+// the picker. xhigh and max must map to a non-null string or pi leaves them
+// out of the thinking-level cycle, so they ride the full scale too.
+const FULL_EFFORT_SCALE: Record<string, string> = {
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+};
+
 function thinkingLevelMap(model: DeepInfraModel): ProviderModelConfig["thinkingLevelMap"] {
   if (!model.tags.includes("reasoning")) return undefined;
-  return model.tags.includes("can-disable-reasoning") ? { off: "none" } : { off: null };
+  const canDisable = model.tags.includes("can-disable-reasoning");
+  return { ...FULL_EFFORT_SCALE, off: canDisable ? "none" : null };
 }
 
 export function toModel(model: DeepInfraModel): ProviderModelConfig {

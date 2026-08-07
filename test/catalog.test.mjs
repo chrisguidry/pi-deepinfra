@@ -102,14 +102,30 @@ test("omits the thinking level map on non-reasoning models", () => {
   assert.equal(toModel(catalogModel()).thinkingLevelMap, undefined);
 });
 
-test("maps off to none when the model can disable reasoning", () => {
+test("maps every effort level, off to none when the model can disable reasoning", () => {
   const model = toModel(
     catalogModel({ tags: ["openai", "tools", "reasoning", "can-disable-reasoning"] }),
   );
-  assert.deepEqual(model.thinkingLevelMap, { off: "none" });
+  assert.deepEqual(model.thinkingLevelMap, {
+    minimal: "minimal",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+    off: "none",
+  });
 });
 
-test("removes off when the model cannot disable reasoning", () => {
+test("keeps every effort level but hides off when the model cannot disable reasoning", () => {
   const model = toModel(catalogModel({ tags: ["openai", "tools", "reasoning"] }));
-  assert.deepEqual(model.thinkingLevelMap, { off: null });
+  assert.deepEqual(model.thinkingLevelMap, {
+    minimal: "minimal",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+    off: null,
+  });
 });

@@ -48,7 +48,7 @@ Every model is registered with `supportsDeveloperRole: false`. DeepInfra's OpenA
 
 ## Thinking levels
 
-Pi's thinking levels map to the OpenAI-style `reasoning_effort` parameter, which DeepInfra supports. Models tagged `can-disable-reasoning` in the catalog get an explicit `off` level that sends `reasoning_effort: "none"`. Other reasoning models produce reasoning output no matter what the request asks for, so the extension removes the `off` level from the picker on those models.
+Pi's thinking levels map to the OpenAI-style `reasoning_effort` parameter, which DeepInfra validates against the full scale: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`, each measurably different. Every reasoning model gets all of them in the picker. Models tagged `can-disable-reasoning` in the catalog also get an explicit `off` level that sends `reasoning_effort: "none"` and turns reasoning off. Other reasoning models produce reasoning output no matter what the request asks for, so the extension hides `off` on those models.
 
 The catalog does not publish a context window. The extension uses each model's `max_tokens` as its context window, because DeepInfra sets `max_tokens` to the model's context length. That is the only size signal the endpoint exposes.
 
