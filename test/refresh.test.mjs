@@ -3,14 +3,17 @@ import test from "node:test";
 
 import { refreshModels } from "../index.ts";
 
-function memoryStore(initial = undefined) {
-  let stored = initial;
+function refreshContext({ allowNetwork, stored, signal } = {}) {
+  const published = [];
   return {
-    read: async () => stored,
-    write: async (value) => {
-      stored = value;
+    allowNetwork,
+    stored,
+    signal: signal ?? new AbortController().signal,
+    publish: async (publication) => {
+      published.push(publication);
+      return true;
     },
-    current: () => stored,
+    published,
   };
 }
 
@@ -36,51 +39,61 @@ function stubFetch(t, implementation) {
   });
 }
 
-test("fetches the catalog and persists it when network is allowed", async (t) => {
+test("fetches the catalog and publishes it for persistence when network is allowed", async (t) => {
   stubFetch(t, async () => catalogResponse([SERVING_MODEL]));
-  const store = memoryStore();
+  const context = refreshContext({ allowNetwork: true });
 
-  const models = await refreshModels({ allowNetwork: true, store });
+  const models = await refreshModels(context);
 
   assert.equal(models.length, 1);
   assert.equal(models[0].id, "example/model");
-  assert.equal(store.current().models.length, 1);
+  assert.equal(context.published.length, 1);
+  assert.equal(context.published[0].persist.models.length, 1);
 });
 
-test("falls back to the store when the network fails", async (t) => {
+test("falls back to the stored catalog when the network fails", async (t) => {
   stubFetch(t, async () => {
     throw new Error("connection refused");
   });
-  const store = memoryStore({ models: [{ id: "stored/model" }], checkedAt: 1 });
+  const context = refreshContext({
+    allowNetwork: true,
+    stored: { models: [{ id: "stored/model" }], checkedAt: 1 },
+  });
 
-  const models = await refreshModels({ allowNetwork: true, store });
+  const models = await refreshModels(context);
 
   assert.equal(models.length, 1);
   assert.equal(models[0].id, "stored/model");
 });
 
-test("falls back to the store on a non-200 catalog response", async (t) => {
+test("falls back to the stored catalog on a non-200 catalog response", async (t) => {
   stubFetch(t, async () => ({ ok: false, status: 503 }));
-  const store = memoryStore({ models: [{ id: "stored/model" }], checkedAt: 1 });
+  const context = refreshContext({
+    allowNetwork: true,
+    stored: { models: [{ id: "stored/model" }], checkedAt: 1 },
+  });
 
-  const models = await refreshModels({ allowNetwork: true, store });
+  const models = await refreshModels(context);
 
   assert.equal(models[0].id, "stored/model");
 });
 
-test("reads only the store when network is not allowed", async (t) => {
+test("reads only the stored catalog when network is not allowed", async (t) => {
   stubFetch(t, async () => {
     throw new Error("fetch must not be called");
   });
-  const store = memoryStore({ models: [{ id: "stored/model" }], checkedAt: 1 });
+  const context = refreshContext({
+    allowNetwork: false,
+    stored: { models: [{ id: "stored/model" }], checkedAt: 1 },
+  });
 
-  const models = await refreshModels({ allowNetwork: false, store });
+  const models = await refreshModels(context);
 
   assert.equal(models[0].id, "stored/model");
 });
 
-test("returns no models when the store is empty and network is not allowed", async () => {
-  const models = await refreshModels({ allowNetwork: false, store: memoryStore() });
+test("returns no models when nothing is stored and network is not allowed", async () => {
+  const models = await refreshModels(refreshContext({ allowNetwork: false }));
 
   assert.deepEqual(models, []);
 });
@@ -91,10 +104,11 @@ test("propagates an abort instead of falling back", async (t) => {
     controller.abort();
     throw new Error("aborted");
   });
-  const store = memoryStore({ models: [{ id: "stored/model" }], checkedAt: 1 });
+  const context = refreshContext({
+    allowNetwork: true,
+    stored: { models: [{ id: "stored/model" }], checkedAt: 1 },
+    signal: controller.signal,
+  });
 
-  await assert.rejects(
-    refreshModels({ allowNetwork: true, store, signal: controller.signal }),
-    /aborted/,
-  );
+  await assert.rejects(refreshModels(context), /aborted/);
 });

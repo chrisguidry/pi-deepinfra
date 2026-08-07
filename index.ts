@@ -103,26 +103,27 @@ async function fetchServingModels(signal?: AbortSignal): Promise<ProviderModelCo
   return catalog.filter(isServingTextModel).map(toModel).sort((a, b) => a.id.localeCompare(b.id));
 }
 
-async function persist(store: RefreshModelsContext["store"], models: ProviderModelConfig[]): Promise<void> {
-  await store.write({
-    models: models as unknown as Model<Api>[],
-    checkedAt: Date.now(),
-  });
-}
-
+// pi publishes the returned list in memory, but persistence is the
+// provider's job: publish() writes the catalog so the next offline start
+// can serve it from context.stored.
 export async function refreshModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
   if (context.allowNetwork) {
     try {
       const models = await fetchServingModels(context.signal);
-      await persist(context.store, models);
+      await context.publish({
+        persist: {
+          models: models as unknown as Model<Api>[],
+          checkedAt: Date.now(),
+        },
+      });
       return models;
     } catch (error) {
-      // Aborts propagate in full; transient failures fall back to the store.
-      if (context.signal?.aborted) throw error;
+      // Aborts propagate in full; transient failures fall back to the stored catalog.
+      if (context.signal.aborted) throw error;
     }
   }
 
-  const stored = await context.store.read();
+  const stored = context.stored;
   return stored?.models?.length ? (stored.models as unknown as ProviderModelConfig[]) : [];
 }
 
