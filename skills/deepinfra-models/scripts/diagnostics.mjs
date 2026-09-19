@@ -9,7 +9,7 @@
 // Findings are grouped by cause rather than listed per model. Twenty-one
 // separate near misses are one normalization rule waiting to be written, and
 // grouping is what makes that visible.
-import { normalizeName } from "./match.mjs";
+import { effortlessName, normalizeName } from "./match.mjs";
 
 const SHARED_PREFIX_MIN_LENGTH = 8;
 const SAMPLE_SIZE = 4;
@@ -87,9 +87,12 @@ export function catalogAnomalies(models) {
 export function joinAnomalies(models, scores) {
   const findings = [];
   const sourceKeys = new Map();
+  const effortKeys = new Set();
   for (const score of scores) {
     const key = normalizeName(score.name);
     if (!sourceKeys.has(key)) sourceKeys.set(key, score.name);
+    const base = effortlessName(key);
+    if (base) effortKeys.add(base);
   }
 
   const families = new Map();
@@ -109,7 +112,9 @@ export function joinAnomalies(models, scores) {
   const missesBySuffix = new Map();
   for (const model of models) {
     const key = normalizeName(model.id);
-    if (sourceKeys.has(key)) continue;
+    // An effort variant counts as joined: matchScores falls back to the base
+    // model, so reporting it here would contradict the ranking it produced.
+    if (sourceKeys.has(key) || effortKeys.has(key)) continue;
     const near = [...sourceKeys.entries()]
       .filter(([candidate]) => candidate.length >= SHARED_PREFIX_MIN_LENGTH &&
         (candidate.startsWith(key) || key.startsWith(candidate)))

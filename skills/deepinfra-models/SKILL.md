@@ -63,7 +63,10 @@ misses include brand-new models.
 
 The script marks a score shared across a model family with `~`. A dated
 snapshot and its base model share one score because no source distinguishes
-them, so do not present that score as measured per entry.
+them, so do not present that score as measured per entry. It marks a score taken
+from an effort variant with `^`, which happens when the source measured the
+model at one effort level and has no row for its default. That is the same
+weights, and the score runs slightly high, so say which variant supplied it.
 
 Prices are DeepInfra's current price, with any temporary discount applied.
 

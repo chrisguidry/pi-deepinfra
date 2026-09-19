@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { blendedPrice, toRow } from "../skills/deepinfra-models/scripts/catalog.mjs";
-import { matchScores, normalizeName, rankByValue } from "../skills/deepinfra-models/scripts/match.mjs";
+import { effortlessName, matchScores, normalizeName, rankByValue } from "../skills/deepinfra-models/scripts/match.mjs";
 import { parseCsv, scoresFromJson } from "../skills/deepinfra-models/scripts/sources.mjs";
 
 // A catalog entry that survives the serving filter; tests override one field at
@@ -94,6 +94,80 @@ test("matches a model name it has never seen", () => {
 
   assert.equal(pairs.length, 1);
   assert.equal(pairs[0].matchedName, "Future-Model-9-Vision-Exp-1123");
+});
+
+// The Arena logs one row per effort level, so a model with no row of its own
+// often has a score under a suffixed name. Dropping those rows left the
+// leaderboard looking sparse instead of wrong.
+test("matches an effort variant to the model it varies", () => {
+  const models = [toRow(catalogModel({ model_name: "zai-org/GLM-5.3" }))];
+  const { pairs, unscored } = matchScores(models, [{ name: "glm-5.3-max", score: 1614.4, votes: 3725 }]);
+
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].score, 1614.4);
+  assert.equal(pairs[0].viaEffort, true);
+  assert.deepEqual(unscored, []);
+});
+
+const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+test("matches every effort level the Arena logs", async (t) => {
+  for (const level of EFFORT_LEVELS) {
+    await t.test(level, () => {
+      const models = [toRow(catalogModel({ model_name: "deepseek-ai/DeepSeek-V4-Flash" }))];
+      const { pairs } = matchScores(models, [{ name: `deepseek-v4-flash-${level}`, score: 1580.2 }]);
+
+      assert.equal(pairs.length, 1);
+      assert.equal(pairs[0].viaEffort, true);
+    });
+  }
+});
+
+// An exact row is the model as configured, so it outranks an effort variant.
+test("prefers the exact row over an effort variant", () => {
+  const models = [toRow(catalogModel({ model_name: "zai-org/GLM-5.3-Flash" }))];
+  const { pairs } = matchScores(models, [
+    { name: "glm-5.3-flash-max", score: 1700, votes: 900 },
+    { name: "glm-5.3-flash", score: 1607.1, votes: 100 },
+  ]);
+
+  assert.equal(pairs[0].score, 1607.1);
+  assert.equal(pairs[0].viaEffort, false);
+});
+
+// `max` names a tier in some catalog ids and an effort level in some source
+// names. Only the source side is stripped, so Qwen3.8-Max never inherits a bare
+// qwen3.8 row that belongs to another model.
+test("never strips an effort word from a catalog name", () => {
+  const models = [toRow(catalogModel({ model_name: "Qwen/Qwen3.8-Max" }))];
+  const { pairs, unscored } = matchScores(models, [{ name: "qwen3.8", score: 1500 }]);
+
+  assert.deepEqual(pairs, []);
+  assert.equal(unscored[0].id, "Qwen/Qwen3.8-Max");
+});
+
+test("still matches a model whose own name ends in an effort word", () => {
+  const models = [toRow(catalogModel({ model_name: "Qwen/Qwen3.8-Max" }))];
+  const { pairs } = matchScores(models, [{ name: "qwen3.8-max", score: 1670.6 }]);
+
+  assert.equal(pairs[0].score, 1670.6);
+  assert.equal(pairs[0].viaEffort, false);
+});
+
+test("takes the most measured effort variant when a model has several", () => {
+  const models = [toRow(catalogModel({ model_name: "zai-org/GLM-5.3" }))];
+  const { pairs } = matchScores(models, [
+    { name: "glm-5.3-max", score: 1614.4, votes: 3725 },
+    { name: "glm-5.3-high", score: 1660.4, votes: 12566 },
+  ]);
+
+  assert.equal(pairs[0].score, 1660.4);
+});
+
+test("leaves a name alone when there is no effort suffix to remove", () => {
+  assert.equal(effortlessName("glm5.3flash"), null);
+  assert.equal(effortlessName("glm5.3max"), "glm5.3");
+  assert.equal(effortlessName("max"), null);
 });
 
 test("reports a model no source scored instead of dropping it", () => {

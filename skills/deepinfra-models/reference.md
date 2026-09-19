@@ -183,6 +183,31 @@ name — a dated snapshot and its base model, or a plain and a Turbo build. They
 share a score, marked `~` in the output, because no source distinguishes them.
 Do not present a family score as measured per entry.
 
+### Effort variants
+
+The Arena logs one row per reasoning effort, as `glm-5.3-max` or
+`deepseek-v4-flash-high`, and it often has no row for the model at its default
+effort. Those rows used to be dropped, which made the leaderboard look sparse
+rather than wrong: `DeepSeek-V4.1-Flash` reported as unmeasured while
+`deepseek-v4.1-flash-max` sat above every model that did score.
+
+So the join runs a second lookup. When no exact row exists, `matchScores` strips
+an effort suffix from the source name and looks up the base model. Every effort
+level is tried, longest suffix first so `-xhigh` does not strip as `-high`. When
+one model has several effort rows, the one with the most votes supplies the
+score.
+
+The stripping applies to source names only, never to catalog names. `max` names
+an effort level in a source name and a tier in some catalog ids, so stripping
+both sides would collapse `Qwen3.8-Max`, a model of its own, onto whatever row
+happens to be named `qwen3.8`. An effort suffix on the source side is the only
+thing separating it from the model it varies, which makes that side the safe one
+to strip.
+
+An effort-derived score is marked `^` and listed under the table, because it is
+the model at one effort level rather than at the default. It is a real
+measurement of the same weights, and it inflates the number slightly.
+
 ### No alias table
 
 Nothing here maps one model's name to another's. There is no entry saying
@@ -206,7 +231,7 @@ the same findings under `diagnostics`, which is the form to collect across runs.
 
 | Kind | What it means |
 |---|---|
-| `near-miss` | an unscored model and a source name differ by one word, grouped by suffix and by which side carries it — a normalization rule is probably missing |
+| `near-miss` | an unscored model and a source name differ by one word, grouped by suffix and by which side carries it. A normalization rule is probably missing, and this is the report that found the effort variants |
 | `shared-score` | several catalog models collapse onto one benchmark name |
 | `context-fallback` | no `max_tokens`, so the context window is the default |
 | `zero-price` | input and output both priced at zero |

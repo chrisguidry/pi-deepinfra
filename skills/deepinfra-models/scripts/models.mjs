@@ -96,6 +96,13 @@ function capabilityString(model) {
   return letters.join("");
 }
 
+// The source name a score actually came from, marked when it is not the model
+// as configured: `~` for a name several catalog models share, `^` for an effort
+// variant standing in for its base.
+function matchedNameWithMarkers(pair) {
+  return `${pair.matchedName}${pair.shared ? "~" : ""}${pair.viaEffort ? "^" : ""}`;
+}
+
 function money(value) {
   if (value === 0) return "0";
   return value < 0.01 ? value.toFixed(5) : value.toFixed(3);
@@ -234,7 +241,7 @@ async function scoreCommand(options) {
   if (options.json) {
     console.log(JSON.stringify({
       source: { name: source.source, label: source.label, url: source.url, publishedAt: source.publishedAt },
-      coverage: { scoped: scoped.length, scored: pairs.length, unscored: unscored.length, shared: shared.length },
+      coverage: { scoped: scoped.length, scored: pairs.length, unscored: unscored.length, shared: shared.length, effortDerived: pairs.filter((pair) => pair.viaEffort).length },
       ranked: shown,
       diagnostics: findings,
     }, null, 2));
@@ -262,7 +269,7 @@ async function scoreCommand(options) {
       score(pair.score),
       ...(source.centered ? [] : [pair.value.toFixed(0)]),
       capabilityString(pair.model),
-      pair.shared ? `${pair.matchedName}~` : pair.matchedName,
+      matchedNameWithMarkers(pair),
     ]),
   ));
   console.log("");
@@ -289,6 +296,12 @@ async function scoreCommand(options) {
   if (shared.length > 0) {
     console.log(`score shared across a model family (~) (${shared.length}): ` +
       shared.map((group) => `${group.name} = ${group.models.join("|")}`).join(", "));
+  }
+  const effortDerived = pairs.filter((pair) => pair.viaEffort);
+  if (effortDerived.length > 0) {
+    const listed = effortDerived.slice(0, 6).map((pair) => `${pair.model.id} <- ${pair.matchedName}`);
+    console.log(`score taken from an effort variant (^) (${effortDerived.length}): ${listed.join(", ")}` +
+      (effortDerived.length > listed.length ? `, and ${effortDerived.length - listed.length} more` : ""));
   }
   printFindings(findings, { full: options.flags.has("diagnose") });
   console.log(FLAG_LEGEND);
