@@ -1,6 +1,8 @@
 import type { Api, Model, RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
+import { CATALOG_CACHE_FILE, writeCache } from "./catalog-cache.js";
+
 const PROVIDER_ID = "deepinfra";
 const PROVIDER_NAME = "DeepInfra";
 const BASE_URL = "https://api.deepinfra.com/v1/openai";
@@ -121,11 +123,17 @@ export function toModel(model: DeepInfraModel): ProviderModelConfig {
   };
 }
 
-async function fetchServingModels(signal?: AbortSignal): Promise<ProviderModelConfig[]> {
+async function fetchCatalog(signal?: AbortSignal): Promise<DeepInfraModel[]> {
   const response = await fetch(MODELS_URL, { signal });
   if (!response.ok) throw new Error(`DeepInfra catalog returned HTTP ${response.status}`);
-  const catalog = (await response.json()) as DeepInfraModel[];
-  return catalog.filter(isServingTextModel).map(toModel).sort((a, b) => a.id.localeCompare(b.id));
+  return (await response.json()) as DeepInfraModel[];
+}
+
+export function toModels(catalog: DeepInfraModel[]): ProviderModelConfig[] {
+  return catalog
+    .filter(isServingTextModel)
+    .map(toModel)
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 // pi publishes the returned list in memory, but persistence is the
@@ -134,7 +142,12 @@ async function fetchServingModels(signal?: AbortSignal): Promise<ProviderModelCo
 export async function refreshModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
   if (context.allowNetwork) {
     try {
-      const models = await fetchServingModels(context.signal);
+      const catalog = await fetchCatalog(context.signal);
+      // pi keeps only the converted models, and that conversion drops the tags
+      // and discount fields the skill filters on. Caching the raw download is
+      // what lets the skill answer without fetching the same bytes again.
+      await writeCache(CATALOG_CACHE_FILE, { data: catalog });
+      const models = toModels(catalog);
       await context.publish({
         persist: {
           models: models as unknown as Model<Api>[],

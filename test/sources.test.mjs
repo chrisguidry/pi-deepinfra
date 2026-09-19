@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { arenaScores, epochScores } from "../skills/deepinfra-models/scripts/sources.mjs";
+import { writeCache } from "../catalog-cache.js";
+import { EPOCH_CACHE_FILE, arenaScores, epochScores } from "../skills/deepinfra-models/scripts/sources.mjs";
+import { stubFetch } from "./stub-fetch.mjs";
 
-function stubFetch(t, implementation) {
-  const original = globalThis.fetch;
-  globalThis.fetch = implementation;
-  t.after(() => {
-    globalThis.fetch = original;
-  });
+// A fresh cache directory per test, so no test inherits another's fetched rows
+// and every one of them exercises the fetch path it is about.
+function isolatedCache() {
+  process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "pi-deepinfra-sources-"));
 }
 
 const EPOCH_CSV = `model_id,benchmark_id,performance,benchmark,benchmark_release_date,model,model_version,Model,date,source
@@ -19,7 +22,7 @@ m2,b1,0.3,DeepSWE,2025-01-01,Model B,v1,Model B,2025-01-01,src
 `;
 
 function epochFetch(csv) {
-  return async () => ({ ok: true, text: async () => csv });
+  return async () => ({ ok: true, text: async () => csv, headers: { get: () => "etag-1" } });
 }
 
 function scoreFor(scores, name) {
@@ -27,6 +30,7 @@ function scoreFor(scores, name) {
 }
 
 test("averages every Epoch benchmark when no pattern is given", async (t) => {
+  isolatedCache();
   stubFetch(t, epochFetch(EPOCH_CSV));
 
   const { scores, benchmarks } = await epochScores();
@@ -36,6 +40,7 @@ test("averages every Epoch benchmark when no pattern is given", async (t) => {
 });
 
 test("narrows the Epoch mean to the benchmarks matching a pattern", async (t) => {
+  isolatedCache();
   stubFetch(t, epochFetch(EPOCH_CSV));
 
   const { scores, benchmarks } = await epochScores({ benchmark: "*SWE*" });
@@ -46,9 +51,62 @@ test("narrows the Epoch mean to the benchmarks matching a pattern", async (t) =>
 });
 
 test("a pattern that matches nothing fails instead of reporting no data", async (t) => {
+  isolatedCache();
   stubFetch(t, epochFetch(EPOCH_CSV));
 
   await assert.rejects(epochScores({ benchmark: "not-a-benchmark" }), /no Epoch benchmark matched/);
+});
+
+test("reuses a cached Epoch result within its window", async (t) => {
+  isolatedCache();
+  let calls = 0;
+  stubFetch(t, async () => {
+    calls += 1;
+    return { ok: true, text: async () => EPOCH_CSV, headers: { get: () => "etag-1" } };
+  });
+
+  await epochScores();
+  const { origin } = await epochScores();
+
+  assert.equal(calls, 1);
+  assert.equal(origin.kind, "cache");
+});
+
+// Epoch serves an ETag, so a copy whose window lapsed is revalidated instead of
+// downloaded again. Refreshing the timestamp restarts the window.
+test("revalidates a stale Epoch copy instead of refetching it", async (t) => {
+  isolatedCache();
+  await writeCache(EPOCH_CACHE_FILE, {
+    data: EPOCH_CSV,
+    etag: "etag-1",
+    fetchedAt: Date.now() - 12 * 60 * 60 * 1000,
+  });
+  let sent;
+  stubFetch(t, async (_url, init) => {
+    sent = init.headers["if-none-match"];
+    return { ok: false, status: 304, headers: { get: () => undefined } };
+  });
+
+  const { scores, origin } = await epochScores();
+
+  assert.equal(sent, "etag-1");
+  assert.equal(origin.kind, "revalidated");
+  assert.equal(scoreFor(scores, "Model A"), (50 + 70 + 10) / 3);
+});
+
+test("refresh skips the cached Epoch copy", async (t) => {
+  isolatedCache();
+  let calls = 0;
+  stubFetch(t, async () => {
+    calls += 1;
+    return { ok: true, text: async () => EPOCH_CSV, headers: { get: () => "etag-1" } };
+  });
+
+  await epochScores();
+  const { origin } = await epochScores({ refresh: true });
+
+  assert.equal(calls, 2);
+  assert.equal(origin.kind, "network");
 });
 
 const ARENA_AGENT_PAGE = {
@@ -67,8 +125,13 @@ const ARENA_TEXT_PAGE = {
   ],
 };
 
+function arenaFetch(page) {
+  return async () => ({ ok: true, json: async () => page });
+}
+
 test("reads the rating and vote count the text leaderboards publish", async (t) => {
-  stubFetch(t, async () => ({ ok: true, json: async () => ARENA_TEXT_PAGE }));
+  isolatedCache();
+  stubFetch(t, arenaFetch(ARENA_TEXT_PAGE));
 
   const { scores, centered } = await arenaScores();
 
@@ -80,7 +143,8 @@ test("reads the rating and vote count the text leaderboards publish", async (t) 
 // The agent leaderboard publishes an IPS `score` and an `observation_count`
 // instead, and a zero there means the leaderboard has not placed the model.
 test("reads the score and observation count the agent leaderboard publishes", async (t) => {
-  stubFetch(t, async () => ({ ok: true, json: async () => ARENA_AGENT_PAGE }));
+  isolatedCache();
+  stubFetch(t, arenaFetch(ARENA_AGENT_PAGE));
 
   const { scores, centered } = await arenaScores({ config: "agent" });
 
@@ -90,6 +154,7 @@ test("reads the score and observation count the agent leaderboard publishes", as
 });
 
 test("drops rows from a category other than the one asked for", async (t) => {
+  isolatedCache();
   const mixed = {
     num_rows_total: 2,
     rows: [
@@ -97,16 +162,32 @@ test("drops rows from a category other than the one asked for", async (t) => {
       { row: { model_name: "ignored", rating: 1500, vote_count: 1, category: "chinese" } },
     ],
   };
-  stubFetch(t, async () => ({ ok: true, json: async () => mixed }));
+  stubFetch(t, arenaFetch(mixed));
 
   const { scores } = await arenaScores({ category: "overall" });
 
   assert.deepEqual(scores.map((entry) => entry.name), ["wanted"]);
 });
 
+test("reuses cached Arena rows instead of paging again", async (t) => {
+  isolatedCache();
+  let calls = 0;
+  stubFetch(t, async () => {
+    calls += 1;
+    return { ok: true, json: async () => ARENA_TEXT_PAGE };
+  });
+
+  await arenaScores();
+  const { origin } = await arenaScores();
+
+  assert.equal(calls, 1);
+  assert.equal(origin.kind, "cache");
+});
+
 // The dataset server returns 429 when it has had enough traffic, and 502 while
 // it loads an index. Both are worth waiting out rather than failing the run.
 test("retries a rate-limited response and succeeds", async (t) => {
+  isolatedCache();
   let calls = 0;
   stubFetch(t, async () => {
     calls += 1;
@@ -121,6 +202,7 @@ test("retries a rate-limited response and succeeds", async (t) => {
 });
 
 test("fails at once on a status that will not improve", async (t) => {
+  isolatedCache();
   let calls = 0;
   stubFetch(t, async () => {
     calls += 1;

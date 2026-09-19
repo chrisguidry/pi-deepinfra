@@ -48,7 +48,9 @@ node skills/deepinfra-models/scripts/models.mjs score --source arena --limit 15
 node skills/deepinfra-models/scripts/models.mjs show GLM-5.3-Flash
 ```
 
-Everything is fetched live and neither benchmark source needs a key: scores come from the Arena's published leaderboard and from Epoch AI's benchmark CSV, while prices always come from DeepInfra, so an intelligence-per-dollar figure reflects what you actually pay. Each source covers a bit over half the catalog and they disagree on which half, so the script names the models it could not score instead of quietly ranking a shorter list.
+Everything is read from DeepInfra and from keyless benchmark sources: scores come from the Arena's published leaderboard and from Epoch AI's benchmark CSV, while prices always come from DeepInfra, so an intelligence-per-dollar figure reflects what you actually pay. Each source covers a bit over half the catalog and they disagree on which half, so the script names the models it could not score instead of quietly ranking a shorter list.
+
+The provider and the skill share a cache in `$XDG_CACHE_HOME/pi-deepinfra`. The extension writes the raw catalog there on every model refresh, so a question asked after a refresh downloads nothing, and the skill caches each benchmark source beside it for six hours. Epoch's copy is revalidated with an ETag rather than refetched. Each run says where its numbers came from; `--refresh` ignores the cache.
 
 A run also reports any data ambiguity it hit — a join that nearly happened, a context window that came from a default, a price that looks wrong — because those reports are how the script gets better. `--diagnose` prints each one with the evidence and a suggested fix:
 

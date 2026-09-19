@@ -4,7 +4,8 @@
 // capability per dollar.
 //
 // Run it with the --help flag for the full option list.
-import { blendedPrice, servingModels } from "./catalog.mjs";
+import { describeAge } from "../../../catalog-cache.js";
+import { blendedPrice, loadCatalog, toRows } from "./catalog.mjs";
 import { catalogAnomalies, joinAnomalies, summarize } from "./diagnostics.mjs";
 import { matchScores, rankByValue } from "./match.mjs";
 import { SOURCES, parseCsv, scoresFromJson } from "./sources.mjs";
@@ -33,6 +34,7 @@ Output
   --json
   --diagnose                    every data finding, not just the summary
   --catalog <file>              read a saved catalog instead of fetching it
+  --refresh                     ignore the cached copies and fetch again
 
 Score sources
   --source <arena|epoch>        default: arena
@@ -72,6 +74,16 @@ function parseArgs(argv) {
 }
 
 const FLAG_LEGEND = "flags: r reasoning, d can disable reasoning, v vision, a audio, i video, Z zero retention";
+
+// Where the numbers came from, so a cached price is never read as a fresh one.
+function describeOrigin(origin) {
+  if (!origin) return "unknown";
+  if (origin.kind === "cache") return `cached, ${describeAge(origin.entry)}`;
+  if (origin.kind === "revalidated") return "cached, revalidated as unchanged";
+  if (origin.kind === "network") return "fetched now";
+  if (origin.kind === "file") return `from ${origin.path}`;
+  return origin.kind;
+}
 
 function capabilityString(model) {
   const letters = [];
@@ -183,7 +195,7 @@ async function loadScores(options) {
           name: row.name ?? row.model,
           score: Number(row.score),
         }));
-    return { source: "scores", label: source, url: source, publishedAt: "provided", scores };
+    return { source: "scores", label: source, url: source, publishedAt: "provided", origin: { kind: "file", path: source }, scores };
   }
   const name = options.values.source ?? "arena";
   const loader = SOURCES[name];
@@ -192,14 +204,17 @@ async function loadScores(options) {
     config: options.values.config,
     category: options.values.category,
     benchmark: options.values.benchmark,
+    refresh: options.flags.has("refresh"),
   });
 }
 
 async function scoreCommand(options) {
-  const [models, source] = await Promise.all([
-    servingModels({ path: options.values.catalog }),
+  const refresh = options.flags.has("refresh");
+  const [{ catalog, origin: catalogOrigin }, source] = await Promise.all([
+    loadCatalog({ path: options.values.catalog, refresh }),
     loadScores(options),
   ]);
+  const models = toRows(catalog);
   let scores = source.scores;
   const minVotes = Number(options.values["min-votes"] ?? 0);
   if (minVotes > 0) scores = scores.filter((score) => (score.votes ?? 0) >= minVotes);
@@ -264,6 +279,7 @@ async function scoreCommand(options) {
     console.log("warning: the source paged out before it ran out of rows, so some entries were never read");
   }
   if (source.attribution) console.log(`attribution: ${source.attribution}`);
+  console.log(`data: catalog ${describeOrigin(catalogOrigin)}, ${source.source} ${describeOrigin(source.origin)}`);
   if (unscored.length > 0) {
     const shownNames = unscored.slice(0, 12).map((m) => m.id);
     const rest = unscored.length - shownNames.length;
@@ -281,7 +297,11 @@ async function scoreCommand(options) {
 async function showCommand(options) {
   const id = options.values.model;
   if (!id) throw new Error("show needs a model id");
-  const models = await servingModels({ path: options.values.catalog });
+  const { catalog, origin } = await loadCatalog({
+    path: options.values.catalog,
+    refresh: options.flags.has("refresh"),
+  });
+  const models = toRows(catalog);
   const model = models.find((m) => m.id === id || m.id.endsWith(`/${id}`));
   if (!model) throw new Error(`not a serving DeepInfra model: ${id}`);
   if (options.json) {
@@ -300,6 +320,7 @@ async function showCommand(options) {
   capabilities  ${capabilityString(model)}
   thinking      ${model.efforts.length > 0 ? model.efforts.join(", ") : "not a reasoning model"}
   tags          ${model.tags.join(", ")}`);
+  console.log(`prices        catalog ${describeOrigin(origin)}`);
   if (model.description) console.log(`\n${model.description}`);
 }
 
@@ -320,7 +341,11 @@ async function main() {
   }
   if (options.command !== "list") throw new Error(`unknown command: ${options.command}`);
 
-  const models = await servingModels({ path: options.values.catalog });
+  const { catalog, origin } = await loadCatalog({
+    path: options.values.catalog,
+    refresh: options.flags.has("refresh"),
+  });
+  const models = toRows(catalog);
   const scoped = sortModels(
     models.filter((model) => matchesFilters(model, options.values, options.flags)),
     options.values.sort,
@@ -349,6 +374,7 @@ async function main() {
   console.log(`${shown.length} of ${models.length} serving models; ` +
     `${models.length - scoped.length} filtered out` + (scoped.length > shown.length ? `, ${scoped.length - shown.length} past the limit` : ""));
   console.log("Prices are DeepInfra's current price, list price with any discount applied.");
+  console.log(`data: catalog ${describeOrigin(origin)}`);
   printFindings(findings, { full: options.flags.has("diagnose") });
   console.log(FLAG_LEGEND);
 }

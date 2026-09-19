@@ -39,6 +39,7 @@
   ],
   "files": [
     "index.ts",
+    "catalog-cache.js",
     "skills",
     "README.md",
     "LICENSE"

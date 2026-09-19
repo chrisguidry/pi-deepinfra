@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
+import { CATALOG_CACHE_FILE, readCache } from "../catalog-cache.js";
 import { refreshModels } from "../index.ts";
+import { stubFetch } from "./stub-fetch.mjs";
+
+// Keep the cache out of the real one, and out of every other test file.
+process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "pi-deepinfra-refresh-cache-"));
 
 function refreshContext({ allowNetwork, stored, signal } = {}) {
   const published = [];
@@ -30,14 +38,6 @@ const SERVING_MODEL = {
   tags: ["openai", "tools"],
   max_tokens: 131_072,
 };
-
-function stubFetch(t, implementation) {
-  const original = globalThis.fetch;
-  globalThis.fetch = implementation;
-  t.after(() => {
-    globalThis.fetch = original;
-  });
-}
 
 test("fetches the catalog and publishes it for persistence when network is allowed", async (t) => {
   stubFetch(t, async () => catalogResponse([SERVING_MODEL]));
@@ -131,4 +131,27 @@ test("propagates an abort instead of falling back", async (t) => {
   });
 
   await assert.rejects(refreshModels(context), /aborted/);
+});
+
+// pi keeps only the converted model list, and that conversion drops the tags and
+// pricing fields the skill filters and ranks on. Caching the raw download is
+// what lets a skill run avoid fetching the same bytes again.
+test("caches the raw catalog for the skill to reuse", async (t) => {
+  stubFetch(t, async () =>
+    catalogResponse([
+      {
+        ...SERVING_MODEL,
+        tags: ["openai", "tools", "reasoning"],
+        pricing: { cents_per_input_token: 9e-6, discount: 0.5 },
+        is_partner: false,
+      },
+    ]),
+  );
+
+  await refreshModels(refreshContext({ allowNetwork: true }));
+
+  const entry = await readCache(CATALOG_CACHE_FILE);
+  assert.deepEqual(entry.data[0].tags, ["openai", "tools", "reasoning"]);
+  assert.equal(entry.data[0].pricing.discount, 0.5);
+  assert.equal(entry.data[0].is_partner, false);
 });

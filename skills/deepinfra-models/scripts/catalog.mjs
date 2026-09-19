@@ -4,24 +4,38 @@
 // This reads through the same `isServingTextModel` and `toModel` the provider
 // registers with, so a model the agent recommends is always a model pi can
 // actually route to. Re-implementing the filter here would let the two drift.
+import { CATALOG_CACHE_FILE, CATALOG_TTL_MS, isFresh, readCache, writeCache } from "../../../catalog-cache.js";
 import { isServingTextModel, toModel } from "../../../index.ts";
 
 export const MODELS_URL = "https://api.deepinfra.com/models/list";
 
 export const PROVIDER_ID = "deepinfra";
 
-export async function fetchCatalog({ signal, path } = {}) {
-  // Reading a saved catalog keeps the whole pipeline testable and usable
-  // offline; the file holds exactly what the endpoint returns.
-  if (path) {
-    const { readFile } = await import("node:fs/promises");
-    return JSON.parse(await readFile(path, "utf8"));
-  }
+export async function fetchCatalog({ signal } = {}) {
   const response = await fetch(MODELS_URL, { signal });
   if (!response.ok) {
     throw new Error(`DeepInfra catalog returned HTTP ${response.status}`);
   }
   return response.json();
+}
+
+// The provider writes this file on every refresh, so a run that follows one
+// reads the bytes it already downloaded instead of asking for them again.
+// `--refresh` skips the read; `--catalog` replaces the whole question.
+export async function loadCatalog({ signal, path, refresh = false } = {}) {
+  if (path) {
+    const { readFile } = await import("node:fs/promises");
+    return { catalog: JSON.parse(await readFile(path, "utf8")), origin: { kind: "file", path } };
+  }
+
+  const cached = await readCache(CATALOG_CACHE_FILE);
+  if (!refresh && isFresh(cached, CATALOG_TTL_MS)) {
+    return { catalog: cached.data, origin: { kind: "cache", entry: cached } };
+  }
+
+  const catalog = await fetchCatalog({ signal });
+  await writeCache(CATALOG_CACHE_FILE, { data: catalog });
+  return { catalog, origin: { kind: "network" } };
 }
 
 // The thinking levels a reasoning model actually offers. pi hides a level from
@@ -63,17 +77,16 @@ export function toRow(model) {
   };
 }
 
+export function toRows(catalog) {
+  return catalog
+    .filter(isServingTextModel)
+    .map(toRow)
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 // A 3:1 input:output blend, the convention Artificial Analysis uses for its
 // own blended price. Holding the ratio fixed is what makes a score per dollar
 // figure comparable when the score source changes.
 export function blendedPrice(cost, { inputRatio = 3 } = {}) {
   return (cost.input * inputRatio + cost.output) / (inputRatio + 1);
-}
-
-export async function servingModels({ signal, path } = {}) {
-  const catalog = await fetchCatalog({ signal, path });
-  return catalog
-    .filter(isServingTextModel)
-    .map(toRow)
-    .sort((a, b) => a.id.localeCompare(b.id));
 }

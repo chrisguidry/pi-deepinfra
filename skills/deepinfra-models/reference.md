@@ -100,7 +100,7 @@ request, so offering `off` would be a lie.
 ## Benchmark sources
 
 Both built-in sources are keyless, and neither stores a number in this repo: the
-script fetches them on every run.
+script fetches them and caches the result for a few hours.
 
 **Arena** — `https://datasets-server.huggingface.co/rows?dataset=lmarena-ai/leaderboard-dataset&config=<config>&split=latest&offset=<n>&length=100`
 
@@ -218,3 +218,27 @@ the same findings under `diagnostics`, which is the form to collect across runs.
 | `duplicate-id` | the catalog lists an id twice |
 
 A run that finds nothing prints nothing.
+
+## Caching
+
+The provider and the skill share one cache directory, `$XDG_CACHE_HOME/pi-deepinfra`
+(else `~/Library/Caches` on macOS, else `~/.cache`). The extension writes
+`catalog.json` on every model refresh, because pi keeps only the converted model
+list and that conversion drops the tags, the `is_partner` flag, and the discount
+fields the skill filters and ranks on. The skill reads that file, so a question
+asked after a refresh costs no download at all.
+
+The skill caches its own two sources beside it, keyed by the Arena config and
+category, and holds the whole Epoch CSV rather than one pattern's result because
+any pattern can be derived from the CSV and the CSV is the download worth
+avoiding. Entries live six hours, which matches how often a model catalog or a
+leaderboard actually changes.
+
+Epoch serves an `ETag`, so an entry whose window has lapsed is revalidated with
+`If-None-Match` and a `304` restarts the window without moving any bytes. The
+DeepInfra catalog and the Arena dataset server send no validator, so those are
+refetched when the window lapses.
+
+Every run reports where its numbers came from, as `data: catalog cached, 20 min
+ago, arena fetched now`. `--refresh` ignores the cache, and `--catalog <file>`
+replaces the catalog question entirely.

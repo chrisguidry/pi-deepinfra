@@ -5,20 +5,27 @@ description: Answers questions about which DeepInfra model to use by price, capa
 
 # Choosing a DeepInfra model
 
-Every question here is answered by one script, `scripts/models.mjs`, which
-fetches DeepInfra's live catalog and joins it to a live benchmark source. There
-is no cached table to go stale, and no API key to configure.
+Every question here is answered by one script, `scripts/models.mjs`, which reads
+DeepInfra's live catalog and joins it to a live benchmark source. No API key is
+involved.
+
+`scripts/models.mjs` is relative to this skill's directory, the one pi reports
+as this file's location. Run the commands from there or use the absolute path.
+A path built from the repository root does not find the script.
 
 ## The three questions
 
 **What exists, and what does it cost?**
 
 ```bash
+cd /path/to/this/skill    # the directory holding this SKILL.md
 node scripts/models.mjs                                  # every serving model
 node scripts/models.mjs --vision --max-price 0.3 --sort price
 node scripts/models.mjs --reasoning --zdr --min-context 200000
 node scripts/models.mjs show deepseek-ai/DeepSeek-V4.1-Flash
 ```
+
+The blocks below leave out the `cd` and name the script the same way.
 
 **How does this model compare on quality?** Quality comes from a benchmark
 source, not from DeepInfra, so it needs the `score` command:
@@ -59,6 +66,9 @@ snapshot and its base model share one score because no source distinguishes
 them, so do not present that score as measured per entry.
 
 Prices are DeepInfra's current price, with any temporary discount applied.
+
+Results are cached for a few hours, and the footer says where each number came
+from. `--refresh` ignores the cache when you want the bytes fetched again.
 
 ## Choosing a model for a subagent
 

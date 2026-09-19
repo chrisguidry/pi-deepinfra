@@ -6,6 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { CATALOG_CACHE_FILE, writeCache } from "../catalog-cache.js";
+
 const SCRIPT = fileURLToPath(new URL("../skills/deepinfra-models/scripts/models.mjs", import.meta.url));
 
 // Two models that differ only in context window and price, so a filter either
@@ -32,6 +34,8 @@ const CATALOG = [
 const directory = mkdtempSync(join(tmpdir(), "deepinfra-cli-"));
 const catalogPath = join(directory, "catalog.json");
 const scoresPath = join(directory, "scores.json");
+// A cache directory of our own, so a run never reads the real one.
+const cacheHome = mkdtempSync(join(tmpdir(), "deepinfra-cli-cache-"));
 writeFileSync(catalogPath, JSON.stringify(CATALOG));
 writeFileSync(scoresPath, JSON.stringify({ "big-model": 50, "small-model": 40 }));
 
@@ -41,8 +45,16 @@ function run(args) {
   const output = execFileSync(
     process.execPath,
     [SCRIPT, ...args, "--catalog", catalogPath, "--scores", scoresPath, "--json"],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, XDG_CACHE_HOME: cacheHome } },
   );
+  return JSON.parse(output);
+}
+
+function runAgainstCache(args, cacheHome) {
+  const output = execFileSync(process.execPath, [SCRIPT, ...args, "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, XDG_CACHE_HOME: cacheHome },
+  });
   return JSON.parse(output);
 }
 
@@ -103,4 +115,21 @@ test("an unknown sort fails with the alternatives", () => {
     () => execFileSync(process.execPath, [SCRIPT, "list", "--sort", "score", "--catalog", catalogPath], { encoding: "utf8", stdio: "pipe" }),
     /unknown sort: score/,
   );
+});
+
+// The provider writes this file on every refresh. The skill must find it at the
+// same path and in the same shape, or it downloads the catalog all over again.
+test("list uses the catalog the provider cached", async () => {
+  const cacheHome = mkdtempSync(join(tmpdir(), "deepinfra-cli-shared-"));
+  const previous = process.env.XDG_CACHE_HOME;
+  process.env.XDG_CACHE_HOME = cacheHome;
+  try {
+    await writeCache(CATALOG_CACHE_FILE, { data: [{ ...CATALOG[0], model_name: "lab/from-the-cache" }] });
+  } finally {
+    process.env.XDG_CACHE_HOME = previous;
+  }
+
+  const { models } = runAgainstCache(["list"], cacheHome);
+
+  assert.deepEqual(models.map((model) => model.id), ["lab/from-the-cache"]);
 });

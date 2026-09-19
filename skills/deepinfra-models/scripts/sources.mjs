@@ -1,11 +1,15 @@
-// Benchmark sources. None of them stores a score: each is fetched live, so a
-// number is never older than the site that publishes it.
+// Benchmark sources. No number is stored in this repo: each is fetched live,
+// with the result kept on disk for a few hours so a burst of questions reads
+// the same bytes once.
 //
 // Both built-in sources are keyless. Coverage is partial either way, so the
 // join reports what it could not score rather than quietly ranking a shorter
 // list. A leaderboard neither one carries can be piped in with `--scores`.
+import { SCORES_TTL_MS, isFresh, readCache, writeCache } from "../../../catalog-cache.js";
+
 export const ARENA_ROWS_URL = "https://datasets-server.huggingface.co/rows";
 export const EPOCH_CSV_URL = "https://epoch.ai/data/eci_benchmarks.csv";
+export const EPOCH_CACHE_FILE = "epoch-benchmarks.json";
 
 // The Arena dataset paginates 100 rows per request and the rows are ordered by
 // category, so the category we want is always in the leading pages.
@@ -58,15 +62,16 @@ async function sleep(ms) {
 }
 
 // The Hugging Face dataset server answers 502 while it loads an index and 429
-// when it has had enough traffic, both of which are temporary. Anything else is
-// a real error worth surfacing at once.
+// when it has had enough traffic, both of which are temporary. A 304 is a
+// successful answer too: it says the copy on disk is still current. Anything
+// else is a real error worth surfacing at once.
 async function fetchWithRetry(url, { attempts = 3, ...init } = {}) {
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) await sleep(750 * attempt);
     try {
       const response = await fetch(url, { ...init, headers: { accept: "application/json", ...init.headers } });
-      if (response.ok) return response;
+      if (response.ok || response.status === 304) return response;
       lastError = new Error(`${url} returned HTTP ${response.status}`);
       if (response.status !== 429 && response.status < 500) break;
     } catch (error) {
@@ -76,12 +81,12 @@ async function fetchWithRetry(url, { attempts = 3, ...init } = {}) {
   throw lastError;
 }
 
-async function fetchJson(url, init) {
-  return (await fetchWithRetry(url, init)).json();
+function cached(data, entry) {
+  return { ...data, origin: { kind: "cache", entry } };
 }
 
-async function fetchText(url, init) {
-  return (await fetchWithRetry(url, init)).text();
+function fetched(data) {
+  return { ...data, origin: { kind: "network" } };
 }
 
 // Human preference from the Arena. Every config but `agent` reports `rating`, a
@@ -91,7 +96,11 @@ async function fetchText(url, init) {
 //
 // The configs are separate leaderboards, not categories: `webdev` is the Code
 // Arena, and it is the one that says anything about coding.
-export async function arenaScores({ config = "text_style_control", category = "overall", signal } = {}) {
+export async function arenaScores({ config = "text_style_control", category = "overall", signal, refresh = false } = {}) {
+  const cacheFile = `arena-${config}-${category}.json`;
+  const entry = await readCache(cacheFile);
+  if (!refresh && isFresh(entry, SCORES_TTL_MS)) return cached(entry.data, entry);
+
   const scores = new Map();
   let total = Infinity;
   let scanned = 0;
@@ -104,7 +113,8 @@ export async function arenaScores({ config = "text_style_control", category = "o
       offset: String(page * ARENA_PAGE_SIZE),
       length: String(ARENA_PAGE_SIZE),
     });
-    const payload = await fetchJson(`${ARENA_ROWS_URL}?${params}`, { signal });
+    const response = await fetchWithRetry(`${ARENA_ROWS_URL}?${params}`, { signal });
+    const payload = await response.json();
     total = payload.num_rows_total ?? 0;
     const rows = payload.rows ?? [];
     scanned += rows.length;
@@ -121,7 +131,7 @@ export async function arenaScores({ config = "text_style_control", category = "o
     }
   }
 
-  return {
+  const result = {
     source: "arena",
     label: `Arena (${config.replace("_style_control", "")}, ${category})`,
     url: "https://arena.ai/leaderboard",
@@ -133,6 +143,8 @@ export async function arenaScores({ config = "text_style_control", category = "o
     centered: config === "agent",
     scores: [...scores.values()],
   };
+  await writeCache(cacheFile, { data: result });
+  return fetched(result);
 }
 
 // Epoch AI publishes every benchmark result as one long CSV row, so the score
@@ -149,8 +161,33 @@ function benchmarkMatcher(pattern) {
   return new RegExp(`^${escaped}$`, "i");
 }
 
-export async function epochScores({ benchmark, signal } = {}) {
-  const rows = parseCsv(await fetchText(EPOCH_CSV_URL, { signal }));
+// The whole CSV is cached rather than one pattern's result, because any pattern
+// can be derived from it and it is the download worth avoiding. Epoch serves an
+// ETag, so a stale copy is revalidated instead of refetched.
+async function epochCsv({ signal, refresh = false }) {
+  const entry = await readCache(EPOCH_CACHE_FILE);
+  if (!refresh && isFresh(entry, SCORES_TTL_MS)) return { text: entry.data, origin: { kind: "cache", entry } };
+
+  const conditional = entry?.etag && !refresh ? { "if-none-match": entry.etag } : {};
+  const response = await fetchWithRetry(EPOCH_CSV_URL, {
+    signal,
+    headers: { accept: "text/csv", ...conditional },
+  });
+
+  if (response.status === 304 && entry) {
+    // Still current, so the window restarts without moving any bytes.
+    await writeCache(EPOCH_CACHE_FILE, { data: entry.data, etag: entry.etag });
+    return { text: entry.data, origin: { kind: "revalidated" } };
+  }
+
+  const text = await response.text();
+  await writeCache(EPOCH_CACHE_FILE, { data: text, etag: response.headers?.get?.("etag") ?? undefined });
+  return { text, origin: { kind: "network" } };
+}
+
+export async function epochScores({ benchmark, signal, refresh = false } = {}) {
+  const { text, origin } = await epochCsv({ signal, refresh });
+  const rows = parseCsv(text);
   const matcher = benchmarkMatcher(benchmark);
   const allBenchmarks = new Set(rows.map((row) => row.benchmark).filter(Boolean));
 
@@ -184,6 +221,7 @@ export async function epochScores({ benchmark, signal } = {}) {
     truncated: false,
     benchmarks: [...benchmarksSeen].sort(),
     attribution: "Epoch AI, CC BY",
+    origin,
     scores: [...byModel.values()].map((entry) => ({
       name: entry.name,
       score: (entry.total / entry.count) * 100,
@@ -192,9 +230,6 @@ export async function epochScores({ benchmark, signal } = {}) {
   };
 }
 
-// Artificial Analysis maintains a composite index that means something on its
-// own scale, but its free tier needs an account and an API key, so it is not
-// worth wiring in here. Pull it with `--scores` if you want it.
 export const SOURCES = {
   arena: arenaScores,
   epoch: epochScores,
