@@ -140,25 +140,25 @@ export function toModels(catalog: DeepInfraModel[]): ProviderModelConfig[] {
 // provider's job: publish() writes the catalog so the next offline start
 // can serve it from context.stored.
 export async function refreshModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
+  // pi calls this twice: once with the network off to restore the catalog it
+  // already has, then again with the network on. The stored list belongs to the
+  // offline pass, which leaves the online pass free to report a failure where pi
+  // will surface it. Catching there instead meant a failed fetch put stale
+  // prices in the model picker and looked like a successful refresh.
   if (context.allowNetwork) {
-    try {
-      const catalog = await fetchCatalog(context.signal);
-      // pi keeps only the converted models, and that conversion drops the tags
-      // and discount fields the skill filters on. Caching the raw download is
-      // what lets the skill answer without fetching the same bytes again.
-      await writeCache(CATALOG_CACHE_FILE, { data: catalog });
-      const models = toModels(catalog);
-      await context.publish({
-        persist: {
-          models: models as unknown as Model<Api>[],
-          checkedAt: Date.now(),
-        },
-      });
-      return models;
-    } catch (error) {
-      // Aborts propagate in full; transient failures fall back to the stored catalog.
-      if (context.signal.aborted) throw error;
-    }
+    const catalog = await fetchCatalog(context.signal);
+    // pi keeps only the converted models, and that conversion drops the tags
+    // and discount fields the skill filters on. Caching the raw download is
+    // what lets the skill answer without fetching the same bytes again.
+    await writeCache(CATALOG_CACHE_FILE, { data: catalog });
+    const models = toModels(catalog);
+    await context.publish({
+      persist: {
+        models: models as unknown as Model<Api>[],
+        checkedAt: Date.now(),
+      },
+    });
+    return models;
   }
 
   const stored = context.stored;

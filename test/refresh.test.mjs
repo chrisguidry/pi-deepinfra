@@ -71,7 +71,10 @@ test("persists the thinking level map with a reasoning model", async (t) => {
   assert.equal(context.published[0].persist.models[0].thinkingLevelMap.max, "max");
 });
 
-test("falls back to the stored catalog when the network fails", async (t) => {
+// A failed fetch must reach the caller. pi restores the stored list in an
+// earlier pass, so letting the error out costs nothing and is the only way the
+// model picker and `pi update --models` can say the refresh did not happen.
+test("reports a failed network refresh instead of hiding it", async (t) => {
   stubFetch(t, async () => {
     throw new Error("connection refused");
   });
@@ -80,22 +83,18 @@ test("falls back to the stored catalog when the network fails", async (t) => {
     stored: { models: [{ id: "stored/model" }], checkedAt: 1 },
   });
 
-  const models = await refreshModels(context);
-
-  assert.equal(models.length, 1);
-  assert.equal(models[0].id, "stored/model");
+  await assert.rejects(refreshModels(context), /connection refused/);
+  assert.equal(context.published.length, 0);
 });
 
-test("falls back to the stored catalog on a non-200 catalog response", async (t) => {
+test("reports a non-200 catalog response instead of hiding it", async (t) => {
   stubFetch(t, async () => ({ ok: false, status: 503 }));
   const context = refreshContext({
     allowNetwork: true,
     stored: { models: [{ id: "stored/model" }], checkedAt: 1 },
   });
 
-  const models = await refreshModels(context);
-
-  assert.equal(models[0].id, "stored/model");
+  await assert.rejects(refreshModels(context), /HTTP 503/);
 });
 
 test("reads only the stored catalog when network is not allowed", async (t) => {
@@ -112,6 +111,8 @@ test("reads only the stored catalog when network is not allowed", async (t) => {
   assert.equal(models[0].id, "stored/model");
 });
 
+// The offline pass is the one that keeps the provider usable when the network
+// pass fails, so it must never throw on a missing catalog.
 test("returns no models when nothing is stored and network is not allowed", async () => {
   const models = await refreshModels(refreshContext({ allowNetwork: false }));
 
