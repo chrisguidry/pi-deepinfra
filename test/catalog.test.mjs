@@ -56,6 +56,38 @@ test("cache rates are multipliers on the input price", () => {
   assert.equal(model.cost.cacheWrite, 0);
 });
 
+// DeepInfra's model pages show the list price and the discounted price side by
+// side, with the discounted one as the price a request costs today. These are
+// the figures from the GLM-5.3-Flash page: $0.15/$0.50 list at 50% off.
+test("applies the discount to input and output prices", () => {
+  const model = toModel(
+    catalogModel({
+      pricing: {
+        cents_per_input_token: 1.5e-5,
+        cents_per_output_token: 5e-5,
+        rate_per_input_token_cached: 0.2,
+        discount: 0.5,
+      },
+    }),
+  );
+  assert.equal(model.cost.input, 0.075);
+  assert.equal(model.cost.output, 0.25);
+});
+
+test("multiplies the cache rate by the discounted input price", () => {
+  const model = toModel(
+    catalogModel({
+      pricing: {
+        cents_per_input_token: 1.5e-5,
+        cents_per_output_token: 5e-5,
+        rate_per_input_token_cached: 0.2,
+        discount: 0.5,
+      },
+    }),
+  );
+  assert.equal(model.cost.cacheRead, 0.015);
+});
+
 test("prices a model with no pricing at zero", () => {
   const model = toModel(catalogModel({ pricing: undefined }));
   assert.deepEqual(model.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });

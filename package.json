@@ -39,12 +39,16 @@
   ],
   "files": [
     "index.ts",
+    "skills",
     "README.md",
     "LICENSE"
   ],
   "pi": {
     "extensions": [
       "./index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "peerDependencies": {

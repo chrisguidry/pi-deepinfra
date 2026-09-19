@@ -38,11 +38,33 @@ If `DEEPINFRA_API_KEY` is set, it wins over the `models.json` entry, because ext
 
 Open the model picker with `/model` (or `Ctrl+P`). Pi refreshes catalogs, and the DeepInfra models appear. With no key configured the models load but stay hidden, like other providers.
 
+## Choosing a model
+
+The package ships a [skill](skills/deepinfra-models/SKILL.md) for questions about which model to use. Ask pi "what's the cheapest model here with vision?" or "which model is the best value for coding right now?", or ask it to pick the model for a subagent, and it runs the bundled script rather than guessing from stale memory:
+
+```bash
+node skills/deepinfra-models/scripts/models.mjs --vision --max-price 0.3 --sort price
+node skills/deepinfra-models/scripts/models.mjs score --source arena --limit 15
+node skills/deepinfra-models/scripts/models.mjs show GLM-5.3-Flash
+```
+
+Everything is fetched live and neither benchmark source needs a key: scores come from the Arena's published leaderboard and from Epoch AI's benchmark CSV, while prices always come from DeepInfra, so an intelligence-per-dollar figure reflects what you actually pay. Each source covers a bit over half the catalog and they disagree on which half, so the script names the models it could not score instead of quietly ranking a shorter list.
+
+A run also reports any data ambiguity it hit — a join that nearly happened, a context window that came from a default, a price that looks wrong — because those reports are how the script gets better. `--diagnose` prints each one with the evidence and a suggested fix:
+
+```bash
+node skills/deepinfra-models/scripts/models.mjs score --source epoch --diagnose
+```
+
+Neither the script nor the skill keeps a list of model names or aliases. Joining DeepInfra's ids to another site's names is done by rule at query time, so a model released tomorrow needs no change here. [The reference](skills/deepinfra-models/reference.md) covers the pricing arithmetic, the tag semantics, and the source schemas.
+
 ## What gets registered
 
 The extension keeps only serving text-generation models that can call tools, and drops the rest: deprecated and replaced entries, models without tool calling, and every non-chat model (image, video, audio, embeddings). Pi sends tool definitions on every request, so a model without tool calling fails on DeepInfra. The filter keeps roughly 85 models from a catalog of 350.
 
 On each model refresh the extension fetches `https://api.deepinfra.com/models/list`, converts DeepInfra's per-token pricing into pi's per-million-token cost fields, and persists the result to pi's model store. The catalog is available offline after the first refresh.
+
+DeepInfra publishes a list price per token and a `discount` that is the fraction off it, and its model pages show both figures with the discounted one as the price today. The extension registers the discounted price, and multiplies the cache rate by that discounted input price, which is how DeepInfra computes it.
 
 Every model is registered with `supportsDeveloperRole: false`. DeepInfra's OpenAI-compatible endpoint accepts only the `system`, `user`, `assistant`, and `tool` roles, and without the override pi sends the system prompt as a `developer` message on reasoning models, which DeepInfra rejects with HTTP 422.
 

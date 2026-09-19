@@ -18,6 +18,8 @@ interface DeepInfraPricing {
   cents_per_output_token?: number | null;
   rate_per_input_token_cached?: number | null;
   rate_per_input_token_cache_write?: number | null;
+  discount?: number | null;
+  rate_per_explicit_cache_write_token?: Record<string, number> | null;
 }
 
 interface DeepInfraModel {
@@ -50,11 +52,28 @@ function perMillion(centsPerToken: number | null | undefined): number {
 
 // The cache rate fields are multipliers on the input price (0.2 means cache
 // reads cost 0.2x the input rate), unlike the cents-per-token price fields.
+// Callers pass the effective input price, because DeepInfra scales the cached
+// rate with the discount rather than with the list price.
 function perMillionCached(
   rate: number | null | undefined,
   inputPerMillion: number,
 ): number {
   return (rate ?? 0) * inputPerMillion;
+}
+
+// The cents-per-token fields are the list price and `discount` is the fraction
+// off it, so 0.3 means pay 70%. DeepInfra's model pages show both figures side
+// by side with the discounted one as the current price, which makes it the
+// price a request actually costs and the only one worth registering.
+function costFor(model: DeepInfraModel): ProviderModelConfig["cost"] {
+  const multiplier = 1 - (model.pricing?.discount ?? 0);
+  const input = perMillion(model.pricing?.cents_per_input_token) * multiplier;
+  return {
+    input,
+    output: perMillion(model.pricing?.cents_per_output_token) * multiplier,
+    cacheRead: perMillionCached(model.pricing?.rate_per_input_token_cached, input),
+    cacheWrite: perMillionCached(model.pricing?.rate_per_input_token_cache_write, input),
+  };
 }
 
 // DeepInfra's OpenAI-compatible endpoint validates reasoning_effort against
@@ -83,19 +102,13 @@ function thinkingLevelMap(model: DeepInfraModel): ProviderModelConfig["thinkingL
 export function toModel(model: DeepInfraModel): ProviderModelConfig {
   const contextWindow =
     model.max_tokens && model.max_tokens > 0 ? model.max_tokens : DEFAULT_CONTEXT_WINDOW;
-  const inputPerMillion = perMillion(model.pricing?.cents_per_input_token);
   return {
     id: model.model_name,
     name: model.model_name,
     reasoning: model.tags.includes("reasoning"),
     thinkingLevelMap: thinkingLevelMap(model),
     input: model.tags.includes("multimodal") ? ["text", "image"] : ["text"],
-    cost: {
-      input: inputPerMillion,
-      output: perMillion(model.pricing?.cents_per_output_token),
-      cacheRead: perMillionCached(model.pricing?.rate_per_input_token_cached, inputPerMillion),
-      cacheWrite: perMillionCached(model.pricing?.rate_per_input_token_cache_write, inputPerMillion),
-    },
+    cost: costFor(model),
     contextWindow,
     maxTokens: Math.min(contextWindow, DEFAULT_MAX_TOKENS),
     // DeepInfra's OpenAI-compatible endpoint accepts only the system, user,
