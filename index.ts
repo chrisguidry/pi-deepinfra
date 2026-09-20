@@ -95,8 +95,19 @@ const FULL_EFFORT_SCALE: Record<string, string> = {
   max: "max",
 };
 
+// DeepInfra records reasoning two ways: the `reasoning` tag on models that
+// reason by default, and `can-disable-reasoning` on models where
+// `reasoning_effort: "none"` turns it off. Several models carry only the
+// second, sometimes next to a stale `non-reasoning`. A model that accepts
+// `none` has reasoning to disable, so either tag proves the capability;
+// reading only `reasoning` left those models without thinking levels, and on
+// the ones that default to no reasoning it left them running silently.
+function isReasoningModel(model: DeepInfraModel): boolean {
+  return model.tags.includes("reasoning") || model.tags.includes("can-disable-reasoning");
+}
+
 function thinkingLevelMap(model: DeepInfraModel): ProviderModelConfig["thinkingLevelMap"] {
-  if (!model.tags.includes("reasoning")) return undefined;
+  if (!isReasoningModel(model)) return undefined;
   const canDisable = model.tags.includes("can-disable-reasoning");
   return { ...FULL_EFFORT_SCALE, off: canDisable ? "none" : null };
 }
@@ -107,7 +118,7 @@ export function toModel(model: DeepInfraModel): ProviderModelConfig {
   return {
     id: model.model_name,
     name: model.model_name,
-    reasoning: model.tags.includes("reasoning"),
+    reasoning: isReasoningModel(model),
     thinkingLevelMap: thinkingLevelMap(model),
     input: model.tags.includes("multimodal") ? ["text", "image"] : ["text"],
     cost: costFor(model),

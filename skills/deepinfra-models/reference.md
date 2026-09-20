@@ -56,7 +56,7 @@ changes.
 | `tools` | can call functions |
 | `reasoning` | supports reasoning |
 | `non-reasoning` | answers without reasoning by default |
-| `can-disable-reasoning` | accepts `reasoning_effort: "none"` |
+| `can-disable-reasoning` | accepts `reasoning_effort: "none"`, so the model reasons |
 | `multimodal` | takes image input; pi maps it to `["text", "image"]` |
 | `input-audio`, `input-video` | take audio or video input |
 | `json`, `structured-output` | JSON mode and schema-constrained output |
@@ -69,10 +69,12 @@ changes.
 contradiction: it marks a hybrid that reasons on demand. The extension registers
 those with the full effort scale, which is the right reading.
 
-`can-disable-reasoning` appears on three models that are *not* tagged
-`reasoning`. The extension only builds a thinking level map for models tagged
-`reasoning`, so on those the override never reaches pi. Worth checking whether
-the API takes `reasoning_effort` there.
+`can-disable-reasoning` also appears on models that are not tagged `reasoning`,
+some of them tagged `non-reasoning` instead. Either tag marks the model as
+reasoning: one that accepts `reasoning_effort: "none"` has reasoning to
+disable. The tag pair describes the default, not a contradiction — a
+`non-reasoning` model carrying the tag answers without reasoning until the
+request asks otherwise.
 
 ## Zero retention
 
@@ -93,9 +95,11 @@ Reasoning models on DeepInfra accept the whole OpenAI-style scale: `none`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and anything else is
 rejected with HTTP 422. pi leaves `xhigh` and `max` out of the level cycle
 unless the map pins them to a non-null string, and hides a level pinned to
-`null`. `off` therefore maps to `none` only on models tagged
-`can-disable-reasoning`; on the others the model reasons regardless of the
-request, so offering `off` would be a lie.
+`null`. A model counts as reasoning when the catalog tags it `reasoning` or
+`can-disable-reasoning`, because a model that accepts `none` has reasoning to
+disable. `off` maps to `none` only on models tagged `can-disable-reasoning`; on
+the others the model reasons regardless of the request, so offering `off` would
+be a lie.
 
 ## Benchmark sources
 
@@ -239,7 +243,6 @@ the same findings under `diagnostics`, which is the form to collect across runs.
 | `discount-out-of-range` | discount is not a fraction between 0 and 1 |
 | `discount-expiring` | the discount has an end date, so a registered price will be too low later |
 | `hybrid-reasoning` | tagged reasoning and non-reasoning together |
-| `thinking-levels-missing` | `can-disable-reasoning` on a model the extension does not treat as reasoning |
 | `duplicate-id` | the catalog lists an id twice |
 
 A run that finds nothing prints nothing.

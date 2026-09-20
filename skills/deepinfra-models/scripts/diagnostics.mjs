@@ -66,13 +66,6 @@ export function catalogAnomalies(models) {
     findings.push(finding("hybrid-reasoning", plural(hybrids.length, "model"), "tagged reasoning and non-reasoning together, so they reason on demand", `registered as reasoning models with the full effort scale: ${sample(hybrids.map((m) => m.id))}`));
   }
 
-  // The extension builds a thinking level map only for models tagged
-  // `reasoning`, so on these the disable-reasoning override never reaches pi.
-  const unused = models.filter((m) => m.tags.includes("can-disable-reasoning") && !m.tags.includes("reasoning"));
-  if (unused.length > 0) {
-    findings.push(finding("thinking-levels-missing", plural(unused.length, "model"), "can-disable-reasoning without the reasoning tag, so pi registers no thinking levels", `check whether the API accepts reasoning_effort here; if it does the extension should read can-disable-reasoning too: ${sample(unused.map((m) => m.id))}`));
-  }
-
   if (duplicates.length > 0) {
     findings.push(finding("duplicate-id", plural(duplicates.length, "model"), "listed more than once in the catalog", `collapses to one entry per id: ${sample(duplicates)}`));
   }

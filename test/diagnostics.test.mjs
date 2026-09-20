@@ -48,12 +48,6 @@ test("groups hybrid reasoning models into one finding", () => {
   assert.equal(findings[0].subject, "2 models");
 });
 
-test("flags a disable-reasoning override the extension never reads", () => {
-  const findings = catalogAnomalies([row({ tags: ["openai", "tools", "can-disable-reasoning"] })]);
-
-  assert.deepEqual(kinds(findings), ["thinking-levels-missing"]);
-});
-
 test("reports a cache rate above one as unexpected", () => {
   const findings = catalogAnomalies([
     row({ pricing: { cents_per_input_token: 9e-6, rate_per_input_token_cached: 1.5 } }),

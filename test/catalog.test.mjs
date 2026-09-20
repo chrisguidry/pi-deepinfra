@@ -118,6 +118,35 @@ test("marks reasoning from the catalog tag", () => {
   assert.equal(toModel(catalogModel({ tags: ["openai", "tools", "reasoning"] })).reasoning, true);
 });
 
+// DeepInfra tags several reasoning models `non-reasoning` and records the
+// capability only as `can-disable-reasoning`. A model that accepts
+// `reasoning_effort: "none"` must reason, so the tag alone is proof enough.
+test("marks a model that can disable reasoning as reasoning", () => {
+  const model = toModel(
+    catalogModel({ tags: ["openai", "tools", "non-reasoning", "can-disable-reasoning"] }),
+  );
+  assert.equal(model.reasoning, true);
+});
+
+test("gives a model that only can disable reasoning the full scale with off", () => {
+  const model = toModel(catalogModel({ tags: ["openai", "tools", "can-disable-reasoning"] }));
+  assert.deepEqual(model.thinkingLevelMap, {
+    minimal: "minimal",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+    off: "none",
+  });
+});
+
+test("leaves a model tagged only non-reasoning without thinking levels", () => {
+  const model = toModel(catalogModel({ tags: ["openai", "tools", "non-reasoning"] }));
+  assert.equal(model.reasoning, false);
+  assert.equal(model.thinkingLevelMap, undefined);
+});
+
 test("marks image input from the multimodal tag", () => {
   assert.deepEqual(toModel(catalogModel()).input, ["text"]);
   assert.deepEqual(toModel(catalogModel({ tags: ["openai", "tools", "multimodal"] })).input, [
