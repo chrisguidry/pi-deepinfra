@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/chrisguidry/pi-deepinfra/actions/workflows/ci.yml/badge.svg)](https://github.com/chrisguidry/pi-deepinfra/actions/workflows/ci.yml)
 
-A [pi](https://pi.dev) extension that registers [DeepInfra](https://deepinfra.com) as a model provider. The catalog is discovered live, so there are no hard-wired model entries.
+A [pi](https://pi.dev) extension that registers [DeepInfra](https://deepinfra.com) as a model provider. The catalog is discovered live, so there are no hard-wired model entries — only a small patch table for catalog gaps, described under [Thinking levels](#thinking-levels).
 
 ## Install
 
@@ -73,6 +73,8 @@ Every model is registered with `supportsDeveloperRole: false`. DeepInfra's OpenA
 ## Thinking levels
 
 Pi's thinking levels map to the OpenAI-style `reasoning_effort` parameter, which DeepInfra validates against the full scale: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`, each measurably different. Every reasoning model gets all of them in the picker. A model counts as reasoning when the catalog tags it `reasoning` or `can-disable-reasoning`: DeepInfra records some models only as the latter, sometimes beside a stale `non-reasoning`, and those still take the full scale. Models tagged `can-disable-reasoning` in the catalog also get an explicit `off` level that sends `reasoning_effort: "none"` and turns reasoning off. Other reasoning models produce reasoning output no matter what the request asks for, so the extension hides `off` on those models.
+
+DeepInfra sometimes omits a capability tag its endpoint still serves, and the extension reads capabilities from tags alone, so the gap would register the model as not having the capability. A small patch table keyed by model id adds the missing tags for the gaps observed so far — currently Kimi-K3, which serves `reasoning_effort` including `none` but ships with no reasoning tag. The table lists nothing else about those models, and the skill's diagnostics report a patch whose model left the catalog or whose tags the catalog has since added, so it gets deleted rather than maintained.
 
 The catalog does not publish a context window. The extension uses each model's `max_tokens` as its context window, because DeepInfra sets `max_tokens` to the model's context length. That is the only size signal the endpoint exposes.
 

@@ -190,3 +190,26 @@ test("keeps every effort level but hides off when the model cannot disable reaso
     off: null,
   });
 });
+
+// Kimi-K3's catalog entry omits every reasoning tag even though the endpoint
+// serves reasoning_effort, so the extension patches the entry with the same tag
+// pair the catalog gives Kimi-K2.6.
+test("patches a catalog entry known to omit its reasoning tags", () => {
+  const model = toModel(catalogModel({ model_name: "moonshotai/Kimi-K3" }));
+  assert.equal(model.reasoning, true);
+  assert.deepEqual(model.thinkingLevelMap, {
+    minimal: "minimal",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "xhigh",
+    max: "max",
+    off: "none",
+  });
+});
+
+test("leaves a model without a patch alone", () => {
+  const model = toModel(catalogModel({ model_name: "moonshotai/Kimi-K3-Turbo" }));
+  assert.equal(model.reasoning, false);
+  assert.equal(model.thinkingLevelMap, undefined);
+});

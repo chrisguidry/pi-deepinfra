@@ -95,6 +95,31 @@ const FULL_EFFORT_SCALE: Record<string, string> = {
   max: "max",
 };
 
+// DeepInfra occasionally omits from a catalog entry a capability the endpoint
+// still serves, and every consumer here reads capabilities from tags, so the
+// gap silently registers the model without the capability. Each entry adds the
+// tags one observed model is missing; nothing else about the model is listed.
+// Delete an entry once the catalog carries the tag, which the skill's
+// overrideAnomalies reports.
+const TAG_OVERRIDES: Record<string, string[]> = {
+  // Serves reasoning_effort, including "none", but the catalog lists no
+  // reasoning tag, so it registered as a non-reasoning model and pi never sent
+  // an effort. This is the tag pair the catalog gives the otherwise identical
+  // Kimi-K2.6.
+  "moonshotai/Kimi-K3": ["reasoning", "can-disable-reasoning"],
+};
+
+// The tags a model is treated as having: its catalog tags, plus any override.
+export function effectiveTags(model: DeepInfraModel): string[] {
+  const added = TAG_OVERRIDES[model.model_name];
+  return added ? [...new Set([...model.tags, ...added])] : model.tags;
+}
+
+// The overrides, for the skill to check against the live catalog.
+export function tagOverrides(): { model: string; tags: string[] }[] {
+  return Object.entries(TAG_OVERRIDES).map(([model, tags]) => ({ model, tags }));
+}
+
 // DeepInfra records reasoning two ways: the `reasoning` tag on models that
 // reason by default, and `can-disable-reasoning` on models where
 // `reasoning_effort: "none"` turns it off. Several models carry only the
@@ -102,25 +127,26 @@ const FULL_EFFORT_SCALE: Record<string, string> = {
 // `none` has reasoning to disable, so either tag proves the capability;
 // reading only `reasoning` left those models without thinking levels, and on
 // the ones that default to no reasoning it left them running silently.
-function isReasoningModel(model: DeepInfraModel): boolean {
-  return model.tags.includes("reasoning") || model.tags.includes("can-disable-reasoning");
+function isReasoningModel(tags: string[]): boolean {
+  return tags.includes("reasoning") || tags.includes("can-disable-reasoning");
 }
 
-function thinkingLevelMap(model: DeepInfraModel): ProviderModelConfig["thinkingLevelMap"] {
-  if (!isReasoningModel(model)) return undefined;
-  const canDisable = model.tags.includes("can-disable-reasoning");
+function thinkingLevelMap(tags: string[]): ProviderModelConfig["thinkingLevelMap"] {
+  if (!isReasoningModel(tags)) return undefined;
+  const canDisable = tags.includes("can-disable-reasoning");
   return { ...FULL_EFFORT_SCALE, off: canDisable ? "none" : null };
 }
 
 export function toModel(model: DeepInfraModel): ProviderModelConfig {
+  const tags = effectiveTags(model);
   const contextWindow =
     model.max_tokens && model.max_tokens > 0 ? model.max_tokens : DEFAULT_CONTEXT_WINDOW;
   return {
     id: model.model_name,
     name: model.model_name,
-    reasoning: isReasoningModel(model),
-    thinkingLevelMap: thinkingLevelMap(model),
-    input: model.tags.includes("multimodal") ? ["text", "image"] : ["text"],
+    reasoning: isReasoningModel(tags),
+    thinkingLevelMap: thinkingLevelMap(tags),
+    input: tags.includes("multimodal") ? ["text", "image"] : ["text"],
     cost: costFor(model),
     contextWindow,
     maxTokens: Math.min(contextWindow, DEFAULT_MAX_TOKENS),

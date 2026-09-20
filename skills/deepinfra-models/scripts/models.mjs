@@ -6,7 +6,7 @@
 // Run it with the --help flag for the full option list.
 import { describeAge } from "../../../catalog-cache.js";
 import { blendedPrice, loadCatalog, toRows } from "./catalog.mjs";
-import { catalogAnomalies, joinAnomalies, summarize } from "./diagnostics.mjs";
+import { catalogAnomalies, joinAnomalies, overrideAnomalies, summarize } from "./diagnostics.mjs";
 import { matchScores, rankByValue } from "./match.mjs";
 import { SOURCES, parseCsv, scoresFromJson } from "./sources.mjs";
 
@@ -236,7 +236,7 @@ async function scoreCommand(options) {
     : rankByValue(pairs);
   const limit = Number(options.values.limit ?? 20);
   const shown = ranked.slice(0, limit);
-  const findings = [...catalogAnomalies(scoped), ...joinAnomalies(scoped, scores)];
+  const findings = [...catalogAnomalies(scoped), ...overrideAnomalies(models), ...joinAnomalies(scoped, scores)];
 
   if (options.json) {
     console.log(JSON.stringify({
@@ -364,7 +364,7 @@ async function main() {
     options.values.sort,
   );
   const shown = options.values.limit ? scoped.slice(0, Number(options.values.limit)) : scoped;
-  const findings = catalogAnomalies(scoped);
+  const findings = [...catalogAnomalies(scoped), ...overrideAnomalies(models)];
 
   if (options.json) {
     console.log(JSON.stringify({ models: shown, diagnostics: findings }, null, 2));

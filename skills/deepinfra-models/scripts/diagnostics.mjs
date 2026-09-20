@@ -9,6 +9,7 @@
 // Findings are grouped by cause rather than listed per model. Twenty-one
 // separate near misses are one normalization rule waiting to be written, and
 // grouping is what makes that visible.
+import { tagOverrides } from "../../../index.ts";
 import { effortlessName, normalizeName } from "./match.mjs";
 
 const SHARED_PREFIX_MIN_LENGTH = 8;
@@ -68,6 +69,34 @@ export function catalogAnomalies(models) {
 
   if (duplicates.length > 0) {
     findings.push(finding("duplicate-id", plural(duplicates.length, "model"), "listed more than once in the catalog", `collapses to one entry per id: ${sample(duplicates)}`));
+  }
+
+  return findings;
+}
+
+// The extension adds missing tags to a few models whose catalog entry is wrong.
+// A catalog that now carries those tags makes the override redundant, and a
+// model that vanished makes it dead; either way the entry should go, so the
+// override cannot quietly grow into a model catalog of its own. This runs over
+// the unfiltered rows, because a filter that hides the model would otherwise
+// read as the model being gone.
+export function overrideAnomalies(models) {
+  const byId = new Map(models.map((model) => [model.id, model]));
+  const findings = [];
+  const redundant = [];
+  const stale = [];
+
+  for (const { model, tags } of tagOverrides()) {
+    const entry = byId.get(model);
+    if (!entry) stale.push(model);
+    else if (tags.every((tag) => entry.tags.includes(tag))) redundant.push(model);
+  }
+
+  if (redundant.length > 0) {
+    findings.push(finding("tag-override-redundant", plural(redundant.length, "override"), "adds tags the catalog already carries", `delete the override: ${sample(redundant)}`));
+  }
+  if (stale.length > 0) {
+    findings.push(finding("tag-override-stale", plural(stale.length, "override"), "names a model the catalog no longer lists", `delete the override: ${sample(stale)}`));
   }
 
   return findings;

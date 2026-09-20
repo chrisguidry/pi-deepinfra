@@ -76,6 +76,20 @@ disable. The tag pair describes the default, not a contradiction — a
 `non-reasoning` model carrying the tag answers without reasoning until the
 request asks otherwise.
 
+## Catalog patches
+
+DeepInfra sometimes omits a capability tag its endpoint still serves. Kimi-K3
+is the standing example: the catalog lists no reasoning tag, but the endpoint
+accepts `reasoning_effort` and honors `none`, and the model reasons by default.
+The extension carries a small override table keyed by model id that adds the
+missing tags, so the tag reading above still decides everything and nothing
+else about the model is restated. It is a patch list for observed gaps, not a
+model catalog.
+
+The `overrideAnomalies` diagnostic compares that table to the live catalog. An
+entry whose model vanished, or whose tags the catalog has since added, is one to
+delete, so the table cleans itself up instead of growing.
+
 ## Zero retention
 
 DeepInfra serves partner models from the partner's own infrastructure and

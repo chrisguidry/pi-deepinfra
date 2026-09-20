@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { toRow } from "../skills/deepinfra-models/scripts/catalog.mjs";
-import { catalogAnomalies, joinAnomalies, summarize } from "../skills/deepinfra-models/scripts/diagnostics.mjs";
+import { catalogAnomalies, joinAnomalies, overrideAnomalies, summarize } from "../skills/deepinfra-models/scripts/diagnostics.mjs";
 
 function row(overrides = {}) {
   return toRow({
@@ -112,4 +112,23 @@ test("counts findings by kind with the most common first", () => {
   const findings = [{ kind: "a" }, { kind: "b" }, { kind: "a" }];
 
   assert.deepEqual(summarize(findings), [["a", 2], ["b", 1]]);
+});
+
+test("stays quiet while an override is still fixing a gap", () => {
+  assert.deepEqual(overrideAnomalies([row({ model_name: "moonshotai/Kimi-K3" })]), []);
+});
+
+test("reports an override the catalog has caught up to", () => {
+  const findings = overrideAnomalies([
+    row({
+      model_name: "moonshotai/Kimi-K3",
+      tags: ["openai", "tools", "reasoning", "can-disable-reasoning"],
+    }),
+  ]);
+
+  assert.deepEqual(kinds(findings), ["tag-override-redundant"]);
+});
+
+test("reports an override for a model that left the catalog", () => {
+  assert.deepEqual(kinds(overrideAnomalies([row()])), ["tag-override-stale"]);
 });

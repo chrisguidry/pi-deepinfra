@@ -5,7 +5,7 @@
 // registers with, so a model the agent recommends is always a model pi can
 // actually route to. Re-implementing the filter here would let the two drift.
 import { CATALOG_CACHE_FILE, CATALOG_TTL_MS, isFresh, readCache, writeCache } from "../../../catalog-cache.js";
-import { isServingTextModel, toModel } from "../../../index.ts";
+import { effectiveTags, isServingTextModel, toModel } from "../../../index.ts";
 
 export const MODELS_URL = "https://api.deepinfra.com/models/list";
 
@@ -49,6 +49,7 @@ export function availableEfforts(thinkingLevelMap) {
 
 export function toRow(model) {
   const registered = toModel(model);
+  const tags = effectiveTags(model);
   return {
     id: registered.id,
     spec: `${PROVIDER_ID}/${registered.id}`,
@@ -59,9 +60,9 @@ export function toRow(model) {
     // set, which is what makes is_partner the ZDR signal.
     zdr: !model.is_partner,
     vision: registered.input.includes("image"),
-    audio: model.tags.includes("input-audio"),
-    video: model.tags.includes("input-video"),
-    canDisableReasoning: model.tags.includes("can-disable-reasoning"),
+    audio: tags.includes("input-audio"),
+    video: tags.includes("input-video"),
+    canDisableReasoning: tags.includes("can-disable-reasoning"),
     efforts: availableEfforts(registered.thinkingLevelMap),
     context: registered.contextWindow,
     // Kept alongside the effective context so a fallback can be reported as a
