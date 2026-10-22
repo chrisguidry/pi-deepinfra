@@ -1,4 +1,4 @@
-import type { Api, Model, RefreshModelsContext } from "@earendil-works/pi-ai";
+import type { Api, Model, RefreshModelsContext, ThinkingLevelMap } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
 import { CATALOG_CACHE_FILE, writeCache } from "./catalog-cache.js";
@@ -131,7 +131,7 @@ function isReasoningModel(tags: string[]): boolean {
   return tags.includes("reasoning") || tags.includes("can-disable-reasoning");
 }
 
-function thinkingLevelMap(tags: string[]): ProviderModelConfig["thinkingLevelMap"] {
+function thinkingLevelMap(tags: string[]): ThinkingLevelMap | undefined {
   if (!isReasoningModel(tags)) return undefined;
   const canDisable = tags.includes("can-disable-reasoning");
   return { ...FULL_EFFORT_SCALE, off: canDisable ? "none" : null };
